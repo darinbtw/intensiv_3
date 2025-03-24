@@ -118,7 +118,6 @@ class PredictionModel:
             # As we don't have it, we'll return a similar structure as above
             pass
 
-
 class MatplotlibCanvas(FigureCanvas):
     """Canvas for Matplotlib plots"""
     

@@ -1,491 +1,453 @@
-import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-from catboost import CatBoostRegressor
+import pandas as pd
+import xgboost as xgb
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
 import joblib
 import os
-import warnings
-import re
-warnings.filterwarnings('ignore')
 
-class ReinforcementPriceModel:
-    """
-    Class for training and using CatBoost model to predict reinforcement prices
-    """
+class XGBoostPriceModel:
+    """XGBoost model for reinforcement price prediction"""
+    
     def __init__(self):
         self.model = None
-        self.feature_columns = None
-        self.target_column = 'Цена на арматуру'
-        self.date_column = 'dt'
-    
-    def _clean_numeric_columns(self, df):
+        self.scaler = StandardScaler()
+        self.feature_cols = None
+        self.target_col = 'Цена на арматуру'
+        self.model_path = 'model/reinforcement_price_model.pkl'
+        self.scaler_path = 'model/scaler.pkl'
+        self.feature_cols_path = 'model/feature_cols.pkl'
+        
+    def prepare_features(self, df, additional_df=None):
         """
-        Clean numeric columns by converting strings with commas, K, M, B suffixes, 
-        and percentage values to float values
-        """
-        # Loop through all columns that might be numeric
-        for col in df.columns:
-            # Skip the date column
-            if col == self.date_column:
-                continue
-                
-            # Check if column contains strings that need conversion
-            if df[col].dtype == 'object':
-                try:
-                    # Function to convert various numeric formats
-                    def convert_to_number(value):
-                        if isinstance(value, (int, float)):
-                            return value
-                        
-                        if pd.isna(value):
-                            return np.nan
-                            
-                        # Convert to string and remove any quotes
-                        value = str(value).strip('"\'')
-                        
-                        # Handle percentage values
-                        if '%' in value:
-                            # Remove percentage sign and convert to float/100
-                            return float(value.replace('%', '').replace(',', '')) / 100
-                        
-                        # Remove any commas in the number
-                        value = value.replace(',', '')
-                        
-                        # Check for suffixes (K, M, B)
-                        if value.endswith('K') or value.endswith('k'):
-                            return float(value[:-1]) * 1000
-                        elif value.endswith('M') or value.endswith('m'):
-                            return float(value[:-1]) * 1000000
-                        elif value.endswith('B') or value.endswith('b'):
-                            return float(value[:-1]) * 1000000000
-                        else:
-                            # Try to convert to float directly
-                            return float(value)
-                    
-                    # Apply the conversion function to the column
-                    df[col] = df[col].apply(convert_to_number)
-                    
-                except Exception as e:
-                    # If conversion fails, print details for debugging
-                    print(f"Warning: Could not convert column '{col}' to numeric. Error: {e}")
-                    
-                    # Try to identify problematic values
-                    if df[col].dtype == 'object':
-                        unique_values = df[col].dropna().unique()
-                        if len(unique_values) < 20:  # Only print if there aren't too many values
-                            print(f"Sample unique values in column '{col}': {unique_values[:5]}")
-                    
-                    # Keep the column as is (might be a categorical column)
-                    pass
-                    
-        return df
+        Prepare features for model training/prediction
         
-    def _prepare_data(self, data, additional_data=None):
-        """
-        Prepare data for the model by:
-        1. Converting dates to datetime
-        2. Creating time-based features
-        3. Merging with additional data if provided
-        4. Handling missing values
-        5. Creating lag features for time series
-        """
-        df = data.copy()
-        
-        # Clean numeric columns that might have commas, K, M, B suffixes, percentages
-        df = self._clean_numeric_columns(df)
-        
-        # Ensure date is in datetime format
-        df[self.date_column] = pd.to_datetime(df[self.date_column])
-        
-        # Sort by date
-        df = df.sort_values(by=[self.date_column])
-        
-        # Create date-based features
-        df['year'] = df[self.date_column].dt.year
-        df['month'] = df[self.date_column].dt.month
-        df['week_of_year'] = df[self.date_column].dt.isocalendar().week
-        df['day_of_week'] = df[self.date_column].dt.dayofweek
-        df['quarter'] = df[self.date_column].dt.quarter
-        
-        # Add is_month_start, is_month_end, is_quarter_start, is_quarter_end
-        df['is_month_start'] = df[self.date_column].dt.is_month_start.astype(int)
-        df['is_month_end'] = df[self.date_column].dt.is_month_end.astype(int)
-        df['is_quarter_start'] = df[self.date_column].dt.is_quarter_start.astype(int)
-        df['is_quarter_end'] = df[self.date_column].dt.is_quarter_end.astype(int)
-        
-        # Create lag features (previous weeks prices)
-        for lag in range(1, 13):  # Create lags up to 12 weeks
-            df[f'price_lag_{lag}'] = df[self.target_column].shift(lag)
+        Args:
+            df: DataFrame with historical price data
+            additional_df: Optional DataFrame with additional features
             
-        # Create rolling mean features at different windows
+        Returns:
+            DataFrame with prepared features
+        """
+        # Make sure data is sorted by date
+        df = df.sort_values('dt')
+        
+        # Create time-based features
+        df['year'] = df['dt'].dt.year
+        df['month'] = df['dt'].dt.month
+        df['week'] = df['dt'].dt.isocalendar().week
+        df['day_of_week'] = df['dt'].dt.dayofweek
+        df['quarter'] = df['dt'].dt.quarter
+        
+        # Create lag features (previous prices)
+        for lag in [1, 2, 3, 4, 8, 12]:
+            df[f'price_lag_{lag}'] = df[self.target_col].shift(lag)
+            
+        # Create rolling mean features
         for window in [2, 4, 8, 12]:
-            df[f'price_rolling_mean_{window}'] = df[self.target_column].rolling(window=window).mean()
-            df[f'price_rolling_std_{window}'] = df[self.target_column].rolling(window=window).std()
+            df[f'rolling_mean_{window}'] = df[self.target_col].rolling(window=window).mean()
+            df[f'rolling_std_{window}'] = df[self.target_col].rolling(window=window).std()
             
-        # Create price momentum features (percent change)
-        for period in [1, 2, 4, 8]:
-            df[f'price_pct_change_{period}'] = df[self.target_column].pct_change(periods=period)
+        # Calculate price momentum (change over time)
+        for window in [1, 2, 4]:
+            df[f'momentum_{window}'] = df[self.target_col].diff(window)
         
-        # If additional data is provided, merge it
-        if additional_data is not None:
-            additional_df = additional_data.copy()
-            additional_df = self._clean_numeric_columns(additional_df)
-            additional_df[self.date_column] = pd.to_datetime(additional_df[self.date_column])
+        # Merge additional features if provided
+        if additional_df is not None:
+            additional_df = additional_df.sort_values('dt')
             
             # Merge on date
-            df = pd.merge(df, additional_df, on=self.date_column, how='left')
-        
-        # Handle missing values
-        df = df.fillna(method='bfill').fillna(method='ffill')
-        
-        # Drop rows with NaN values (should only be initial rows with lag features)
+            df = pd.merge_asof(df, additional_df, on='dt', direction='nearest')
+            
+        # Drop rows with NaN values (created by lag and rolling features)
         df = df.dropna()
-        
-        # Print column types to help with debugging
-        print("DataFrame column types after preparation:")
-        print(df.dtypes)
-        
-        # Check for any remaining object columns and print sample values
-        obj_cols = df.select_dtypes(include=['object']).columns
-        if len(obj_cols) > 0:
-            print(f"\nWarning: Found object columns after preparation: {list(obj_cols)}")
-            for col in obj_cols:
-                print(f"Sample values for '{col}': {df[col].dropna().unique()[:5]}")
         
         return df
     
-    def _select_features(self, df):
+    def train(self, train_df, additional_df=None, test_size=0.2, random_state=42):
         """
-        Select features for training, excluding the target and date column
-        """
-        # Exclude date column and target column
-        self.feature_columns = [col for col in df.columns if col != self.date_column and col != self.target_column]
+        Train the XGBoost model
         
-        # Additional check: exclude any object columns (non-numeric)
-        object_columns = df[self.feature_columns].select_dtypes(include=['object']).columns
-        if len(object_columns) > 0:
-            print(f"Warning: Excluding object columns from features: {list(object_columns)}")
-            self.feature_columns = [col for col in self.feature_columns if col not in object_columns]
-        
-        return df[self.feature_columns], df[self.target_column]
-    
-    def train(self, train_data, additional_data=None, test_size=0.2, random_state=42):
-        """
-        Train the CatBoost model on the provided data
-        
-        Parameters:
-        -----------
-        train_data : pandas.DataFrame
-            DataFrame containing historical price data
-        additional_data : pandas.DataFrame, optional
-            DataFrame containing additional features
-        test_size : float, optional
-            Proportion of data to use for testing
-        random_state : int, optional
-            Random seed for reproducibility
+        Args:
+            train_df: DataFrame with historical price data
+            additional_df: Optional DataFrame with additional features
+            test_size: Portion of data to use for testing
+            random_state: Random seed for reproducibility
             
         Returns:
-        --------
-        dict
-            Dictionary containing training results and metrics
+            Dictionary with training results and metrics
         """
-        print("Preparing data for training...")
-        df = self._prepare_data(train_data, additional_data)
+        # Make sure 'dt' column is datetime
+        train_df['dt'] = pd.to_datetime(train_df['dt'])
+        if additional_df is not None:
+            additional_df['dt'] = pd.to_datetime(additional_df['dt'])
+            
+        # Prepare features
+        df = self.prepare_features(train_df, additional_df)
         
-        # Select features and target
-        X, y = self._select_features(df)
+        # Determine feature columns (exclude target and date columns)
+        self.feature_cols = [col for col in df.columns if col not in [self.target_col, 'dt']]
         
-        print(f"Feature columns selected for training: {self.feature_columns}")
+        # Split into features and target
+        X = df[self.feature_cols]
+        y = df[self.target_col]
         
-        # Split data for training and validation
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, shuffle=False
+        # Split into training and testing sets
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state
         )
         
-        print(f"Training data shape: {X_train.shape}")
-        print(f"Validation data shape: {X_val.shape}")
+        # Scale features
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
         
-        # Define CatBoost model
-        self.model = CatBoostRegressor(
-            iterations=1000,
-            learning_rate=0.05,
-            depth=6,
-            loss_function='RMSE',
-            eval_metric='RMSE',
-            random_seed=random_state,
-            early_stopping_rounds=50,
-            verbose=100
-        )
+        # Define XGBoost parameters - fixed for compatibility
+        params = {
+            'objective': 'reg:squarederror',
+            'learning_rate': 0.05,
+            'max_depth': 6,
+            'min_child_weight': 1,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
+            'n_estimators': 200,
+            'random_state': random_state,
+            'n_jobs': -1
+        }
         
-        # Train the model
-        print("Training CatBoost model...")
-        self.model.fit(
-            X_train, y_train,
-            eval_set=(X_val, y_val),
-            use_best_model=True
-        )
+        # Create and train model - FIXED to use eval_set correctly
+        self.model = xgb.XGBRegressor(**params)
+        eval_set = [(X_train_scaled, y_train), (X_test_scaled, y_test)]
         
-        # Evaluate the model
-        val_predictions = self.model.predict(X_val)
-        train_predictions = self.model.predict(X_train)
+        # Different versions of XGBoost handle evaluation differently
+        try:
+            # Try modern version first
+            self.model.fit(
+                X_train_scaled, y_train,
+                eval_set=eval_set,
+                eval_metric='rmse',
+                early_stopping_rounds=25,
+                verbose=False
+            )
+        except TypeError:
+            # Fallback for older versions
+            self.model.fit(
+                X_train_scaled, y_train,
+                eval_set=eval_set,
+                early_stopping_rounds=25,
+                verbose=False
+            )
+                
+        # Make predictions on test set
+        y_pred = self.model.predict(X_test_scaled)
         
         # Calculate metrics
-        train_mae = mean_absolute_error(y_train, train_predictions)
-        val_mae = mean_absolute_error(y_val, val_predictions)
-        train_rmse = np.sqrt(mean_squared_error(y_train, train_predictions))
-        val_rmse = np.sqrt(mean_squared_error(y_val, val_predictions))
-        train_r2 = r2_score(y_train, train_predictions)
-        val_r2 = r2_score(y_val, val_predictions)
+        mae = mean_absolute_error(y_test, y_pred)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        r2 = r2_score(y_test, y_pred)
         
-        # Get feature importance
-        feature_importance = self.model.get_feature_importance(prettified=True)
+        # Get the best iteration if available
+        best_iteration = getattr(self.model, 'best_iteration', None)
         
-        # Print metrics
-        print("\nModel Training Results:")
-        print(f"Training MAE: {train_mae:.2f}")
-        print(f"Validation MAE: {val_mae:.2f}")
-        print(f"Training RMSE: {train_rmse:.2f}")
-        print(f"Validation RMSE: {val_rmse:.2f}")
-        print(f"Training R²: {train_r2:.4f}")
-        print(f"Validation R²: {val_r2:.4f}")
-        
-        # Plot actual vs predicted
-        plt.figure(figsize=(12, 6))
-        plt.plot(y_val.values, label='Actual')
-        plt.plot(val_predictions, label='Predicted')
-        plt.title('Actual vs Predicted Prices (Validation Set)')
-        plt.xlabel('Sample Index')
-        plt.ylabel('Price')
-        plt.legend()
+        # Plot feature importance
+        plt.figure(figsize=(12, 8))
+        xgb.plot_importance(self.model, max_num_features=15)
+        plt.title('Feature Importance')
         plt.tight_layout()
         
-        # Save the figure
-        os.makedirs('model', exist_ok=True)
-        plt.savefig('model/validation_results.png')
-        plt.close()
-        
-        # Print top features
-        print("\nTop 10 Important Features:")
-        print(feature_importance.head(10))
+        # Save model and artifacts
+        self.save_model()
         
         return {
-            'model': self.model,
-            'feature_columns': self.feature_columns,
-            'metrics': {
-                'train_mae': train_mae,
-                'val_mae': val_mae,
-                'train_rmse': train_rmse,
-                'val_rmse': val_rmse,
-                'train_r2': train_r2,
-                'val_r2': val_r2
-            },
-            'feature_importance': feature_importance
+            'success': True,
+            'mae': mae,
+            'rmse': rmse,
+            'r2': r2,
+            'best_iteration': best_iteration,
+            'feature_importance': {
+                feature: importance for feature, importance in 
+                zip(self.feature_cols, self.model.feature_importances_)
+            }
         }
     
-    def save_model(self, filepath='./model/reinforcement_price_model.pkl'):
+    def predict(self, df, additional_df=None, weeks_ahead=4, current_date=None):
         """
-        Save the trained model to a file
-        """
-        if self.model is None:
-            raise ValueError("Model has not been trained yet")
+        Make price predictions for future weeks
         
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        # Save model and feature columns
-        model_data = {
-            'model': self.model,
-            'feature_columns': self.feature_columns
-        }
-        
-        joblib.dump(model_data, filepath)
-        print(f"Model saved to {filepath}")
-        
-        return filepath
-    
-    def load_model(self, filepath='./model/reinforcement_price_model.pkl'):
-        """
-        Load a trained model from a file
-        """
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Model file {filepath} not found")
-        
-        model_data = joblib.load(filepath)
-        self.model = model_data['model']
-        self.feature_columns = model_data['feature_columns']
-        
-        print(f"Model loaded from {filepath}")
-        return True
-    
-    def predict_future(self, data, additional_data=None, weeks_ahead=4, current_date=None):
-        """
-        Predict prices for future weeks
-        
-        Parameters:
-        -----------
-        data : pandas.DataFrame
-            DataFrame containing historical price data
-        additional_data : pandas.DataFrame, optional
-            DataFrame containing additional features
-        weeks_ahead : int, optional
-            Number of weeks to predict ahead
-        current_date : str or datetime, optional
-            Current date to start predictions from
+        Args:
+            df: DataFrame with historical price data
+            additional_df: Optional DataFrame with additional features
+            weeks_ahead: Number of weeks to predict
+            current_date: Optional date to start prediction from
             
         Returns:
-        --------
-        dict
-            Dictionary containing prediction results
+            Dictionary with predictions and recommendation
         """
         if self.model is None:
-            raise ValueError("Model has not been trained or loaded")
+            success = self.load_model()
+            if not success:
+                return {
+                    'success': False,
+                    'message': 'Model not loaded'
+                }
         
-        # Prepare historical data
-        df = self._prepare_data(data, additional_data)
+        # Ensure datetime format
+        df['dt'] = pd.to_datetime(df['dt'])
+        if additional_df is not None:
+            additional_df['dt'] = pd.to_datetime(additional_df['dt'])
         
-        # If current_date is not provided, use the last date in the data
+        # Set current date if not provided
         if current_date is None:
-            current_date = df[self.date_column].max()
+            current_date = df['dt'].max()
         else:
             current_date = pd.to_datetime(current_date)
+            
+        # Get last known price
+        last_price_row = df[df['dt'] <= current_date].sort_values('dt', ascending=False).iloc[0]
+        last_price = last_price_row[self.target_col]
+        last_date = last_price_row['dt']
         
-        # Filter data up to current_date
-        df = df[df[self.date_column] <= current_date]
+        # Prepare initial feature data
+        prepared_df = self.prepare_features(df, additional_df)
         
-        if df.empty:
-            raise ValueError(f"No data available up to {current_date}")
-        
-        # Get the last row of data to use as a starting point for prediction
-        last_row = df.iloc[-1:].copy()
+        # Get latest row of data to use as a base for predictions
+        latest_data = prepared_df[prepared_df['dt'] <= current_date].sort_values('dt', ascending=False).iloc[0].to_dict()
         
         # Store predictions
         predictions = []
-        dates = []
+        weekly_data = []
         
-        # Make iterative predictions for each week
-        current_df = last_row.copy()
+        # Predict for each week ahead
+        current_features = latest_data.copy()
         
         for week in range(1, weeks_ahead + 1):
-            # Update the date for the next prediction
-            next_date = current_date + timedelta(days=7 * week)
-            dates.append(next_date)
+            # Update date for next prediction
+            pred_date = last_date + timedelta(days=7 * week)
             
-            # Update date-related features
-            current_df[self.date_column] = next_date
-            current_df['year'] = next_date.year
-            current_df['month'] = next_date.month
-            current_df['week_of_year'] = next_date.isocalendar()[1]
-            current_df['day_of_week'] = next_date.dayofweek
-            current_df['quarter'] = (next_date.month - 1) // 3 + 1
+            # Update time features
+            current_features['year'] = pred_date.year
+            current_features['month'] = pred_date.month
             
-            # Update is_month_start, is_month_end, is_quarter_start, is_quarter_end
-            current_df['is_month_start'] = 1 if next_date.day == 1 else 0
-            current_df['is_month_end'] = 1 if (next_date + timedelta(days=1)).day == 1 else 0
-            current_df['is_quarter_start'] = 1 if next_date.month in [1, 4, 7, 10] and next_date.day == 1 else 0
-            current_df['is_quarter_end'] = 1 if next_date.month in [3, 6, 9, 12] and (next_date + timedelta(days=1)).day == 1 else 0
+            # Handle week number calculation safely for different pandas versions
+            try:
+                current_features['week'] = pred_date.isocalendar()[1]  # For pandas >= 1.1.0
+            except (TypeError, AttributeError):
+                current_features['week'] = pred_date.week  # For older pandas versions
+                
+            current_features['day_of_week'] = pred_date.dayofweek
+            current_features['quarter'] = (pred_date.month - 1) // 3 + 1
+            
+            # Extract feature values in correct order
+            X_pred = pd.DataFrame([current_features])[self.feature_cols]
+            
+            # Scale features
+            X_pred_scaled = self.scaler.transform(X_pred)
             
             # Make prediction
-            X_pred = current_df[self.feature_columns]
-            price_pred = self.model.predict(X_pred)[0]
-            predictions.append(price_pred)
+            predicted_price = self.model.predict(X_pred_scaled)[0]
+            predictions.append(predicted_price)
             
-            # Update the current_df for the next iteration
-            current_df[self.target_column] = price_pred
-            
-            # Update lag features for next prediction
+            # Update features for next prediction
+            # Shift lag features
             for lag in range(12, 0, -1):
-                if f'price_lag_{lag}' in current_df.columns:
-                    if lag == 1:
-                        current_df[f'price_lag_{lag}'] = current_df[self.target_column]
-                    else:
-                        current_df[f'price_lag_{lag}'] = current_df[f'price_lag_{lag-1}']
+                if f'price_lag_{lag}' in current_features and lag > 1:
+                    current_features[f'price_lag_{lag}'] = current_features.get(f'price_lag_{lag-1}', last_price)
             
-            # Here you would need to update other rolling features as well
-            # For simplicity, we'll keep the values from the last known data point
-        
-        # Prepare final prediction results
-        last_known_price = df.iloc[-1][self.target_column]
-        prediction_data = []
-        
-        for i, (pred_date, pred_price) in enumerate(zip(dates, predictions)):
-            prediction_data.append({
-                "week": i + 1,
-                "dt": pred_date.strftime('%Y-%m-%d'),
-                "price": pred_price
+            # Update lag_1 with current prediction
+            if 'price_lag_1' in current_features:
+                current_features['price_lag_1'] = predicted_price
+                
+            # Update rolling means (simplified)
+            for window in [2, 4, 8, 12]:
+                if f'rolling_mean_{window}' in current_features:
+                    # Simple approximation of rolling average update
+                    prev_mean = current_features[f'rolling_mean_{window}']
+                    current_features[f'rolling_mean_{window}'] = (prev_mean * (window-1) + predicted_price) / window
+            
+            # Update momentum features
+            for window in [1, 2, 4]:
+                if f'momentum_{window}' in current_features:
+                    if week > window:
+                        current_features[f'momentum_{window}'] = predictions[-1] - predictions[-1-window]
+                    else:
+                        # Approximation for early predictions
+                        current_features[f'momentum_{window}'] = predicted_price - last_price
+            
+            # Add to weekly data
+            weekly_data.append({
+                'week': week,
+                'dt': pred_date.strftime('%Y-%m-%d'),
+                'Цена на арматуру': predicted_price
             })
         
+        # Calculate average prediction
         avg_prediction = np.mean(predictions)
-        price_change_pct = ((avg_prediction - last_known_price) / last_known_price) * 100
         
-        # Generate recommendation based on price trend
+        # Calculate price change
+        price_change_pct = ((avg_prediction - last_price) / last_price) * 100
+        
+        # Generate recommendation
         if price_change_pct > 5:
             recommendation = "HOLD: Prices are expected to rise significantly. Recommend a smaller tender now."
-            confidence = "High" if price_change_pct > 10 else "Medium"
+            confidence = "High"
         elif price_change_pct < -5:
             recommendation = "BUY: Prices are expected to drop. Recommend a larger tender for the entire period."
-            confidence = "High" if price_change_pct < -10 else "Medium"
+            confidence = "High"
+        elif price_change_pct > 2:
+            recommendation = "NEUTRAL-HOLD: Prices are expected to rise slightly. Consider standard tender with slight reduction."
+            confidence = "Medium"
+        elif price_change_pct < -2:
+            recommendation = "NEUTRAL-BUY: Prices are expected to drop slightly. Consider standard tender with slight increase."
+            confidence = "Medium"
         else:
             recommendation = "NEUTRAL: Prices are expected to remain stable. Proceed with standard tender volume."
             confidence = "Medium"
         
+        # Check for trend patterns
+        price_trend = np.array(predictions)
+        price_diff = np.diff(price_trend)
+        
+        # Check if consistently rising or falling
+        if np.all(price_diff > 0):
+            confidence = "High"
+            recommendation = "WAIT: Prices consistently rising each week. Delay purchases if possible."
+        elif np.all(price_diff < 0):
+            confidence = "High"
+            recommendation = "DELAY: Prices consistently falling each week. Consider delaying major purchases."
+        
+        # Check for volatility
+        volatility = np.std(predictions) / np.mean(predictions) * 100
+        if volatility > 5:
+            confidence = "Low"
+            recommendation += " High volatility detected, consider hedging strategies."
+        
         return {
-            "success": True,
-            "average_prediction": avg_prediction,
-            "last_price": last_known_price,
-            "price_change_pct": price_change_pct,
-            "recommendation": recommendation,
-            "confidence": confidence,
-            "weeks_ahead": weeks_ahead,
-            "weekly_predictions": prediction_data
+            'success': True,
+            'average_prediction': avg_prediction,
+            'last_price': last_price,
+            'price_change_pct': price_change_pct,
+            'recommendation': recommendation,
+            'confidence': confidence,
+            'weeks_ahead': weeks_ahead,
+            'weekly_predictions': weekly_data,
+            'volatility': volatility,
+            'prediction_date': current_date.strftime('%Y-%m-%d')
         }
-
-
-def main():
-    """
-    Main function to train and save the model
-    """
-    # Load the data (paths should be adjusted based on actual file locations)
-    try:
-        print("Loading data...")
-        train_data = pd.read_csv('./vladislav_work/processed_data.csv')
+    
+    def save_model(self):
+        """Save the model and related components to disk"""
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
         
-        # Print a sample of the data to help with debugging
-        print("\nSample of training data:")
-        print(train_data.head())
-        print("\nData columns and types:")
-        print(train_data.dtypes)
-        print("\nColumns with object (string) type:")
-        object_cols = train_data.select_dtypes(include=['object']).columns
-        for col in object_cols:
-            print(f"Sample values for '{col}': {train_data[col].dropna().unique()[:5]}")
+        # Save model
+        joblib.dump(self.model, self.model_path)
         
-        # Check if additional data exists
-        additional_data = None
-        if os.path.exists('data/additional_features.csv'):
-            additional_data = pd.read_csv('data/additional_features.csv')
-            print("Additional features data loaded.")
+        # Save scaler
+        joblib.dump(self.scaler, self.scaler_path)
+        
+        # Save feature columns
+        joblib.dump(self.feature_cols, self.feature_cols_path)
+        
+        return True
+    
+    def load_model(self):
+        """Load the model and related components from disk"""
+        try:
+            if not os.path.exists(self.model_path):
+                return False
             
-            # Print a sample of additional data
-            print("\nSample of additional data:")
-            print(additional_data.head())
-        
-        # Initialize and train the model
-        model = ReinforcementPriceModel()
-        results = model.train(train_data, additional_data)
-        
-        # Save the model
-        model.save_model()
-        
-        print("\nModel training complete and saved!")
-        
+            # Load model
+            self.model = joblib.load(self.model_path)
+            
+            # Load scaler
+            if os.path.exists(self.scaler_path):
+                self.scaler = joblib.load(self.scaler_path)
+            
+            # Load feature columns
+            if os.path.exists(self.feature_cols_path):
+                self.feature_cols = joblib.load(self.feature_cols_path)
+            
+            return True
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            return False
+
+
+# Example usage for integration with the main application
+if __name__ == "__main__":
+    # Sample data generation for testing
+    dates = pd.date_range(start='2022-01-01', end='2023-12-31', freq='W')
+    price_trend = np.linspace(40000, 60000, len(dates))
+    
+    # Add some seasonality and noise
+    seasonality = 5000 * np.sin(np.linspace(0, 6*np.pi, len(dates)))
+    noise = np.random.normal(0, 1000, len(dates))
+    
+    prices = price_trend + seasonality + noise
+    
+    # Create DataFrame
+    df = pd.DataFrame({
+        'dt': dates,
+        'Цена на арматуру': prices
+    })
+    
+    # Create additional features
+    additional_df = pd.DataFrame({
+        'dt': dates,
+        'USD_Rate': np.random.uniform(70, 85, len(dates)),
+        'Oil_Price': np.random.uniform(60, 120, len(dates)),
+        'Steel_Index': np.random.uniform(100, 150, len(dates))
+    })
+    
+    # Initialize model
+    model = XGBoostPriceModel()
+    
+    print("Starting model training...")
+    
+    # Train model with error handling
+    try:
+        train_result = model.train(df, additional_df)
+        print(f"Training results: MAE: {train_result['mae']:.2f}, RMSE: {train_result['rmse']:.2f}, R²: {train_result['r2']:.4f}")
     except Exception as e:
-        print(f"Error during model training: {e}")
+        print(f"Error during training: {e}")
         import traceback
         traceback.print_exc()
-
-
-if __name__ == "__main__":
-    main()
+    
+    print("Making predictions...")
+    
+    # Make predictions with error handling
+    try:
+        prediction_result = model.predict(df, additional_df, weeks_ahead=8)
+        
+        print(f"Prediction: {prediction_result['recommendation']}")
+        print(f"Confidence: {prediction_result['confidence']}")
+        print(f"Price change: {prediction_result['price_change_pct']:.2f}%")
+        
+        # Print weekly predictions
+        for week in prediction_result['weekly_predictions']:
+            print(f"Week {week['week']}: {week['dt']} - Price: {week['Цена на арматуру']:.2f}")
+        
+        # Plot predictions
+        plt.figure(figsize=(12, 6))
+        
+        # Plot historical data
+        plt.plot(df['dt'], df['Цена на арматуру'], 'b-', label='Historical Data')
+        
+        # Plot predictions
+        pred_dates = [pd.to_datetime(week['dt']) for week in prediction_result['weekly_predictions']]
+        pred_prices = [week['Цена на арматуру'] for week in prediction_result['weekly_predictions']]
+        plt.plot(pred_dates, pred_prices, 'r-o', label='Predictions')
+        
+        plt.title('Reinforcement Price Prediction')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+    except Exception as e:
+        print(f"Error during prediction: {e}")
+        import traceback
+        traceback.print_exc()
