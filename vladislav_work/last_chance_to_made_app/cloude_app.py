@@ -340,6 +340,41 @@ class RebarApp:
         
         refresh_button = ttk.Button(button_frame, text="Обновить прогноз", command=self.update_recommendation)
         refresh_button.pack(side=tk.RIGHT, padx=5)
+
+        help_button = ttk.Button(button_frame, text="Справка о приложении", width=25, command=self.show_help)
+        help_button.pack(side=tk.LEFT, padx=5)
+
+    def show_help(self):
+        """Display a help dialog with application information"""
+        help_text = """Система рекомендаций для закупки арматуры
+
+Основные возможности:
+1. Прогнозирование цен на арматуру на ближайшие 6 недель
+2. Рекомендация оптимального периода закупки
+3. Визуализация исторических и прогнозируемых цен
+4. Сравнение стратегий закупок
+
+Как пользоваться:
+- Введите еженедельную потребность в тоннах
+- Нажмите "Обновить прогноз" для получения рекомендаций
+- Изучите графики прогноза цен и сравнения стратегий
+
+Рекомендации основаны на:
+- Исторических ценах
+- Тенденциях рынка
+- Прогнозировании с использованием машинного обучения
+
+Точность прогноза зависит от качества и объема исторических данных."""
+        
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Справка")
+        help_window.geometry("500x500")
+        
+        help_label = ttk.Label(help_window, text=help_text, wraplength=480, justify=tk.LEFT)
+        help_label.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        
+        close_button = ttk.Button(help_window, text="Закрыть", command=help_window.destroy)
+        close_button.pack(pady=10)
     
     def load_current_data(self):
         """Load the most recent data for prediction"""
