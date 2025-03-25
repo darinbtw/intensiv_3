@@ -1,7 +1,7 @@
 # Система оптимизации закупок арматуры: Углубленное описание проекта
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![Status](https://img.shields.io/badge/Status-In_Development-yellow)
+![Status](https://img.shields.io/badge/Status-Done-green)
 ![Team](https://img.shields.io/badge/Team-3_участника-orange)
 
 ## 🎯 Цели проекта
