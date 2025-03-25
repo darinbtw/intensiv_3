@@ -55,7 +55,7 @@ class RebarPricePredictor:
             self.train_model()
 
             
-            
+
         except Exception as e:
             print(f"Ошибка при инициализации предиктора: {str(e)}")
             raise
