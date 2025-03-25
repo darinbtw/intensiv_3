@@ -406,7 +406,7 @@ class RebarApp:
         self.current_price = last_row['Цена на арматуру']
         
         self.current_date_label.config(text=self.current_date.strftime("%d.%m.%Y"))
-        self.current_price_label.config(text=f"{self.current_price:.2f} руб./т")
+        self.current_price_label.config(text=f"{self.current_price:.2f} руб")
         
         # Update recommendation
         self.update_recommendation()
@@ -492,7 +492,7 @@ class RebarApp:
             # Отображаем информацию
             ttk.Label(self.forecast_frame, text=f"Неделя {week_num} ({date_str}):").grid(row=0, column=i+1, padx=10, pady=5)
             price_label = ttk.Label(self.forecast_frame, 
-                                    text=f"{price:.2f} руб./т", 
+                                    text=f"{price:.2f} руб", 
                                     foreground=color,
                                     font=("Arial", 10, "bold"))
             price_label.grid(row=1, column=i+1, padx=10, pady=5)
