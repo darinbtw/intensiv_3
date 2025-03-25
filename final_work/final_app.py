@@ -219,40 +219,12 @@ class RebarApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Система рекомендаций для закупки арматуры")
-        self.root.geometry("1120x800")
+        self.root.geometry("1000x800")
         self.root.configure(background=LIGHT_BLUE)  # Установка фона корневого окна
         
         # Создаем стиль с корпоративными цветами
         self.style = ttk.Style()
-        
-        # Настройка стилей для различных виджетов
-        self.style.configure('TFrame', background=LIGHT_BLUE)
-        self.style.configure('TLabel', 
-                             background=LIGHT_BLUE, 
-                             foreground=TEXT_COLOR, 
-                             font=('Arial', 10))
-        
-        # Стиль для заголовков
-        self.style.configure('Title.TLabel', 
-                             background=LIGHT_BLUE, 
-                             foreground=PRIMARY_BLUE, 
-                             font=('Arial', 16, 'bold'))
-        
-        # Стиль для кнопок
-        self.style.configure('TButton', 
-                             background=PRIMARY_BLUE, 
-                             foreground=WHITE_COLOR, 
-                             font=('Arial', 10))
-        
-        # Стиль для LabelFrame
-        self.style.configure('TLabelframe', 
-                             background=LIGHT_BLUE, 
-                             bordercolor=PRIMARY_BLUE, 
-                             labelmargin=10)
-        self.style.configure('TLabelframe.Label', 
-                             background=LIGHT_BLUE, 
-                             foreground=PRIMARY_BLUE, 
-                             font=('Arial', 10, 'bold'))
+
         # Определяем переменные
         self.weekly_volume = StringVar(value="1")
         
@@ -379,11 +351,12 @@ class RebarApp:
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=10)
         
-        refresh_button = ttk.Button(button_frame, text="Обновить прогноз", width=25, command=self.update_recommendation)
-        refresh_button.pack(side=tk.RIGHT, padx=5)
+        # В методе setup_ui(), измените создание кнопок:
+        refresh_button = ttk.Button(button_frame, text="Обновить прогноз", command=self.update_recommendation)
+        refresh_button.pack(side=tk.RIGHT, padx=5, fill=tk.BOTH, expand=True)
 
-        help_button = ttk.Button(button_frame, text="Справка о приложении", width=25, command=self.show_help)
-        help_button.pack(side=tk.LEFT, padx=5)
+        help_button = ttk.Button(button_frame, text="Справка о приложении", command=self.show_help)
+        help_button.pack(side=tk.LEFT, padx=5, fill=tk.BOTH, expand=True)
 
     def show_help(self):
         """Display a help dialog with application information"""
