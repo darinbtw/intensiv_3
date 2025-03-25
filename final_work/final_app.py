@@ -12,6 +12,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import datetime
 from matplotlib.dates import DateFormatter
 
+PRIMARY_BLUE = '#FFFFF'      # Темно-синий цвет
+LIGHT_BLUE = '#0099FF'        # Светло-голубой фон
+TEXT_COLOR = '#FFFFFF'        # Темно-серый цвет текста
+ACCENT_COLOR = '#FFFFFF'      # Яркий синий для акцентов
+WHITE_COLOR = '#FFFFFF'       # Белый цвет
+
 class RebarPricePredictor:
     def __init__(self):
         # Load the data
@@ -47,6 +53,8 @@ class RebarPricePredictor:
             
             # Train the model
             self.train_model()
+
+            
             
         except Exception as e:
             print(f"Ошибка при инициализации предиктора: {str(e)}")
@@ -211,8 +219,40 @@ class RebarApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Система рекомендаций для закупки арматуры")
-        self.root.geometry("1000x1000")
+        self.root.geometry("1120x800")
+        self.root.configure(background=LIGHT_BLUE)  # Установка фона корневого окна
         
+        # Создаем стиль с корпоративными цветами
+        self.style = ttk.Style()
+        
+        # Настройка стилей для различных виджетов
+        self.style.configure('TFrame', background=LIGHT_BLUE)
+        self.style.configure('TLabel', 
+                             background=LIGHT_BLUE, 
+                             foreground=TEXT_COLOR, 
+                             font=('Arial', 10))
+        
+        # Стиль для заголовков
+        self.style.configure('Title.TLabel', 
+                             background=LIGHT_BLUE, 
+                             foreground=PRIMARY_BLUE, 
+                             font=('Arial', 16, 'bold'))
+        
+        # Стиль для кнопок
+        self.style.configure('TButton', 
+                             background=PRIMARY_BLUE, 
+                             foreground=WHITE_COLOR, 
+                             font=('Arial', 10))
+        
+        # Стиль для LabelFrame
+        self.style.configure('TLabelframe', 
+                             background=LIGHT_BLUE, 
+                             bordercolor=PRIMARY_BLUE, 
+                             labelmargin=10)
+        self.style.configure('TLabelframe.Label', 
+                             background=LIGHT_BLUE, 
+                             foreground=PRIMARY_BLUE, 
+                             font=('Arial', 10, 'bold'))
         # Определяем переменные
         self.weekly_volume = StringVar(value="1")
         
@@ -260,12 +300,13 @@ class RebarApp:
     
     def setup_ui(self):
         # Main frame
-        main_frame = ttk.Frame(self.scrollable_frame, padding="10")
+        main_frame = ttk.Frame(self.scrollable_frame, style='TFrame')
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Title
-        title_label = ttk.Label(main_frame, text="Система рекомендаций для закупки арматуры", 
-                               font=("Arial", 16, "bold"))
+        title_label = ttk.Label(main_frame, 
+                               text="Система рекомендаций для закупки арматуры", 
+                               style='Title.TLabel')
         title_label.pack(pady=10)
         
         # Current data frame
@@ -287,7 +328,7 @@ class RebarApp:
         self.current_date_label = ttk.Label(input_frame, text="", font=("Arial", 10, "bold"))
         self.current_date_label.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
         
-        ttk.Label(input_frame, text="Текущая цена:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        ttk.Label(input_frame, text="Текущая цена:", style='TLabelframe').grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
         self.current_price_label = ttk.Label(input_frame, text="", font=("Arial", 10, "bold"))
         self.current_price_label.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
         
@@ -297,7 +338,7 @@ class RebarApp:
         volume_entry.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
         
         # Recommendation frame
-        rec_frame = ttk.LabelFrame(main_frame, text="Рекомендация по закупке", padding="10")
+        rec_frame = ttk.LabelFrame(main_frame, text="Рекомендация по закупке", style='TLabelframe')
         rec_frame.pack(fill=tk.X, pady=10)
         
         self.recommendation_label = ttk.Label(rec_frame, text="", font=("Arial", 14, "bold"))
@@ -315,7 +356,7 @@ class RebarApp:
         self.savings_label.pack(pady=5)
         
         # Graph frame for price prediction
-        graph_frame = ttk.LabelFrame(main_frame, text="Прогноз цен", padding="10")
+        graph_frame = ttk.LabelFrame(main_frame, text="Прогноз цен", style='TLabelframe')
         graph_frame.pack(fill=tk.X, pady=10)
         
         self.figure = Figure(figsize=(8, 4), dpi=100)
@@ -325,7 +366,7 @@ class RebarApp:
         self.canvas_fig.get_tk_widget().pack(fill=tk.X)
         
         # График сравнения стратегий
-        strategy_graph_frame = ttk.LabelFrame(main_frame, text="Сравнение стратегий закупок", padding="10")
+        strategy_graph_frame = ttk.LabelFrame(main_frame, text="Сравнение стратегий закупок", style='TLabelframe')
         strategy_graph_frame.pack(fill=tk.X, pady=10)
         
         self.strategy_figure = Figure(figsize=(8, 3), dpi=100)
@@ -338,7 +379,7 @@ class RebarApp:
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=10)
         
-        refresh_button = ttk.Button(button_frame, text="Обновить прогноз", command=self.update_recommendation)
+        refresh_button = ttk.Button(button_frame, text="Обновить прогноз", width=25, command=self.update_recommendation)
         refresh_button.pack(side=tk.RIGHT, padx=5)
 
         help_button = ttk.Button(button_frame, text="Справка о приложении", width=25, command=self.show_help)
@@ -369,11 +410,16 @@ class RebarApp:
         help_window = tk.Toplevel(self.root)
         help_window.title("Справка")
         help_window.geometry("500x500")
+        help_window.configure(background=LIGHT_BLUE)
         
-        help_label = ttk.Label(help_window, text=help_text, wraplength=480, justify=tk.LEFT)
+        help_label = ttk.Label(help_window, 
+                               text=help_text, 
+                               wraplength=480, 
+                               justify=tk.LEFT, 
+                               style='TLabel')
         help_label.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
         
-        close_button = ttk.Button(help_window, text="Закрыть", command=help_window.destroy)
+        close_button = ttk.Button(help_window, text="Закрыть", style='TButton', command=help_window.destroy)
         close_button.pack(pady=10)
     
     def load_current_data(self):
